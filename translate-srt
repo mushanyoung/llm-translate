@@ -1,0 +1,435 @@
+#!/usr/bin/env python3
+
+import os
+import codecs
+import type_enforced
+import re
+import ollama
+from typing import Optional
+
+
+class OllamaTranslate:
+    def __init__(self, model):
+        self.model = model
+        # JPN to CHN
+        # self.model = "qwen3:30b-a3b"
+        # self.model = "qwen2.5:32b"            # quality #1, ~15m for 1100 phrases
+        # self.model = 'qwen2:7b-instruct-fp16' # quality #2, ~6m for 895 phrases
+        # self.model = 'glm4:9b-chat-fp16'      # quality #3, ~6m30s for 895 phrases, 9b
+        # self.model = 'deepseek-v2'            #
+        # self.model = 'gemma2:27b'             # not usable
+        # self.model = 'glm4'                   # bad quality, 9b
+
+        # ENG to CHN
+        # self.model = "qwen3:14b"              #  for Survivor S45
+        # self.model = "qwen3:30b-a3b"          # ~2h for Survivor S45
+        # self.model = 'qwen2.5:32b'            # quality #1, ~5.2h for Survivor S45
+        # self.model = 'deepseek-v2:16b'        # quality #2, ~1.5h for Survivor S45
+        # self.model = 'qwen2:7b'               # quality #3, ~1.5h for Survivor S45
+        # self.model = 'glm4:9b'                # quality similar to qwen2
+        # self.model = 'yi:34b'                 # bad quality, slow
+        # self.model = 'phi3:14b'               # bad quality, ~19m
+        # self.model = 'aya'                    # bad quality, ~6m
+
+        self.target_language = "Simplified Chinese"
+        self.source_language = "English"
+
+        self.prompts = {
+            "Japanese": """You are a professional translator proficient in Simplified Chinese, especially skilled at translating Japanese popular TV shows into Chinese while retaining the original flavor but making the Chinese text smooth, natural, and easy to read. I hope you can help me translate the following Japanese TV show subtitles into Chinese, with a style similar to that of popular Chinese native speaking. Note that there will be a list of special phrases which we'd like to keep them in original Japanese words in the result. The list will be provided in the Rules part.
+
+1. Strategies:
+Do not add any markers such as "Translation:" at the beginning of the translation, just present the translated content directly.
+Be careful not to add any other prompts, explanations, questions, backgrounds or contexts. Only output direct translation without anything else. This is very important.
+If the original text does not need to be translated, simply return the original text without any explanation or question.
+
+2. Rules:
+Accurately convey the facts and background of the original text during translation.
+Retain the names of people, specific terms, brand names, and phrases in the following list from the original text.
+
+If you see any phrases between [START OF LIST] and [END OF LIST], please keep them intact in the output text without translation:
+[START OF LIST]
+水曜日のダウンタウン
+高橋
+茂雄
+小峠
+英二
+バイきんぐ
+モグライダー
+ともしげ
+芝
+劇団
+ひとり
+田中
+卓志
+アンガールズ
+野々村
+友紀子
+野呂
+佳代
+クロちゃん
+西村
+瑞樹
+あかつ
+のどか
+根建
+太一
+囲碁将棋
+滝沢
+秀一
+マシンガンズ
+本間
+キッド
+や団
+あぁ〜しらき
+しらき
+酒井
+貴士
+ザ・マミィ
+ぱーてぃーちゃん
+牧野
+ステテコ
+舐達麻
+プリンアラモード
+メロンソーダ
+コーラフロート
+フルーツパフェ
+パフェ
+オアシス
+ノエル
+リアム
+ギャラガー
+globe
+ホテイ
+スダチ
+カボス
+北の国から
+説
+[END OF LIST]
+
+Again. Only output direct translation without anything else. This is very important.""",
+            "English": """You are a professional translator proficient in Simplified Chinese, especially skilled at translating English popular TV shows into Chinese while retaining the original flavor but making the Chinese text smooth, natural, and easy to read. I hope you can help me translate the following English TV show subtitles into Chinese, with a style similar to that of popular Chinese native speaking.
+
+Rules:
+Accurately convey the facts and background of the original text during translation.
+Retain the names of people, specific terms, and brand names from the original text (if any).
+
+Specific terms:
+Use following specific translations for given terms, A = B means the term A directly translates to B: immunity = 豁免, idol = 神像, player = 选手, Survivor = 幸存者
+
+Strategies:
+Do not add any markers such as "Translation:" at the beginning of the translation, just present the translated content directly.
+Be careful not to add any other prompts, explanations, questions, backgrounds or contexts. Only output direct translation without anything else. This is very important.
+If the original text does not need to be translated, simply return the original text without any explanation or question.""",
+        }
+
+        # 'content': f'''You're an expert of translting TV show subtitles from "{source_language}" to "{target_language}".
+
+    # Now, direct translate the following quoted TV show subtitle sentence from "{source_language}" to "{target_language}", provide only translated text without explanation or original text. If the orignal text does not need to be translated, directly output it without explanation.
+    # "{message}"''',
+    # Use following specific translations for terms, A = B means the term A directly translates to B: idol = 神像, player = 选手, Survivor = 幸存者
+
+    # When translating, provide ONLY direct translation without anything else: no explanation, no original text, no alternatives.
+    # which right follows the "[START]" mark, don't translate the mark.
+    # Only output the translated text. No explanation, no original text, no Phonetic notation, no alternatives. Just pure translated text.
+    # If a sentence starts with a capitalized name and a colon, keep it in the original language.
+
+    def translate(self, message, source_language=None, target_language=None):
+        source_language = source_language or self.source_language
+        target_language = target_language or self.target_language
+        response = ollama.chat(
+            model=self.model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": self.prompts[source_language] + " /no_think",
+                },
+                {
+                    "role": "user",
+                    "content": message,
+                },
+            ],
+        )
+        content = response["message"]["content"]
+        content = re.sub(r"</?think>", "", content, flags=re.DOTALL | re.IGNORECASE)
+        return content
+
+
+@type_enforced.Enforcer
+class SRT_Utils:
+    def parse_srt(
+        self,
+        filepath: str,
+        statement_delimiters: list = [],
+        max_aggregated_statements: int = 3,
+    ):
+        """
+        Parses an SRT file into a dictionary of statements.
+        The keys of the dictionary are the time stamps of the statements.
+        The values of the dictionary are the statements themselves.
+        Statements that are split across multiple lines are aggregated.
+
+        Arguments:
+
+        * **`filepath`**: `[str]` &rarr; The path to the SRT file to be parsed.
+        * **`statement_delimiters`**: `[list]` &rarr; A list of characters that indicate the end of a statement. Defaults to `[".", "?", "!"]`.
+        """
+        time_structure = re.compile(
+            r"\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}"
+        )
+
+        last_time = "00:00:00,000 --> 00:00:00,000"
+        srt_data = {}
+
+        with open(filepath) as filedata:
+            for line in filedata:
+                line_data = line[:-1]
+                if time_structure.match(line_data) is not None:
+                    last_time = line_data
+                    srt_data[last_time] = []
+                else:
+                    if last_time not in srt_data:
+                        srt_data[last_time] = []
+                    srt_data[last_time].append(line_data)
+        for key, value in srt_data.items():
+            srt_data[key] = " ".join(value[:-1] + [""]).strip()
+
+        srt_data = self.aggregate_statements(
+            srt_data=srt_data,
+            statement_delimiters=statement_delimiters,
+            max_aggregated_statements=max_aggregated_statements,
+        )
+        return srt_data
+
+    def aggregate_statements(
+        self, srt_data: dict, statement_delimiters: list, max_aggregated_statements: int
+    ):
+        """
+        Takes in a dictionary of SRT data and aggregates statements that are split across multiple lines.
+        Also aggregates adjacent repeating statements.
+        Items are aggregated until a statement delimiter is found at the end of a line.
+
+        Arguments:
+
+        * **`srt_data`**: `[dict]` &rarr; The parsed SRT data.
+        * **`statement_delimiters`**: `[list]` &rarr; A list of characters that indicate the end of a statement. Defaults to `[".", "?", "!"]`.
+
+        Returns:
+
+        * **`out_data`**: `[dict]` &rarr; The aggregated SRT data.
+
+        EG:
+
+        ```python
+
+        srt_data = {
+            "00:00:00,000 --> 00:00:01,000": "Hello World!",
+            "00:00:01,000 --> 00:00:02,000": "This is",
+            "00:00:02,000 --> 00:00:03,000": "a test."
+        }
+
+        Translator.aggregate_statements(srt_data=srt_data, statement_delimiters=[".", "?", "!"])
+        #=> {
+        #=>     "00:00:00,000 --> 00:00:01,000": "Hello World!",
+        #=>     "00:00:01,000 --> 00:00:03,000": "This is a test."
+        #=> }
+        """
+
+        default_statement_delimiters = [
+            ".",
+            "?",
+            "!",
+            ")",
+            "]",
+            ".</i>",
+            '"',
+            '"♪',
+            ".org",
+            ".com",
+        ]
+        delimiters = set(statement_delimiters + default_statement_delimiters)
+        data = []
+        for key, value in srt_data.items():
+            data.append(
+                {
+                    "start": key.split(" --> ")[0],
+                    "end": key.split(" --> ")[1],
+                    "string": value,
+                }
+            )
+        merged_data = []
+        current_merged_count = 1
+        for idx, item in enumerate(data):
+            if len(item["string"]) == 0:
+                continue
+            # Aggregate adjacent repeating statments.
+            if idx + 1 < len(data) and item["string"] == data[idx + 1]["string"]:
+                data[idx + 1]["start"] = item["start"]
+                continue
+            # Cut current statement based on its ending substring or current
+            # merged account.
+            if (
+                any(map(lambda x: item["string"].endswith(x), delimiters))
+                or idx == len(data) - 1
+                or current_merged_count >= max_aggregated_statements
+            ):
+                merged_data.append(item)
+                current_merged_count = 1
+            # Merge current statement into the next statement.
+            else:
+                data[idx + 1]["string"] = item["string"] + " " + data[idx + 1]["string"]
+                data[idx + 1]["start"] = item["start"]
+                current_merged_count += 1
+        out_data = {}
+        for item in merged_data:
+            out_data[item["start"] + " --> " + item["end"]] = item["string"].strip()
+        return out_data
+
+    def write_srt(self, filepath: str, srt_data: dict):
+        """
+        Writes SRT data to a file.
+
+        Arguments:
+
+        * **`filepath`**: `[str]` &rarr; The path to the SRT file to be written.
+        * **`srt_data`**: `[dict]` &rarr; The SRT data to be written to the file.
+        """
+        idx = 0
+        with codecs.open(filepath, "w+", encoding="utf-8-sig") as out_file:
+            for key, value in srt_data.items():
+                out_file.write(str(idx) + "\n")
+                out_file.write(key + "\n")
+                out_file.write(value + "\n")
+                out_file.write("\n")
+                idx += 1
+
+
+@type_enforced.Enforcer
+class Translator(SRT_Utils):
+    def __init__(self, model: str):
+        """
+        Initializes the Translator class.
+
+        Arguments:
+
+        * **`key_path`**: `[str]` &rarr; The path to the Google Cloud API key.
+            * You can create a key by following the instructions [here](https://cloud.google.com/translate/docs/setup).
+        """
+        self.__client__ = OllamaTranslate(model=model)
+
+    def show_languages(self):
+        """
+        Prints a list of available languages.
+        """
+        for language in self.__languages__:
+            print("{name} ({language})".format(**language))
+
+    def translate(
+        self, text: str, source_language: Optional[str], target_language: Optional[str]
+    ):
+        """
+        Translates a string of text from one language to another.
+
+        Arguments:
+
+        * **`text`**: `[str]` &rarr; The text to be translated.
+        * **`source_language`**: `[str]` &rarr; The language of the text to be translated.
+        * **`target_language`**: `[str]` &rarr; The language to translate the text to.
+        """
+
+        return self.__client__.translate(
+            text,
+            target_language=target_language,
+            source_language=source_language,
+        )
+
+    def srt_file_translator(
+        self,
+        source_file: str,
+        target_file: str,
+        source_language: Optional[str],
+        target_language: Optional[str],
+        appending_original: bool = False,
+        statement_delimiters: list = [],
+        max_aggregated_statements: int = 3,
+    ):
+        """
+        Reads an SRT file, translates the text, and writes the translated text to a new SRT file.
+
+        Arguments:
+
+        * **`source_file`**: `[str]` &rarr; The path to the SRT file to be translated.
+        * **`target_file`**: `[str]` &rarr; The path to the SRT file to be written.
+        * **`source_language`**: `[str]` &rarr; The language of the text to be translated.
+        * **`target_language`**: `[str]` &rarr; The language to translate the text to.
+        * **`statement_delimiters`**: `[list]` &rarr; A list of characters that indicate the end of a statement. Defaults to `[".", "?", "!"]`.
+        """
+        # General Assertions
+        assert source_file.endswith(".srt"), "Source file must be a .srt file"
+        assert target_file.endswith(".srt"), "Target file must be a .srt file"
+
+        # Parse SRT
+        srt_data = self.parse_srt(
+            filepath=source_file,
+            statement_delimiters=statement_delimiters,
+            max_aggregated_statements=max_aggregated_statements,
+        )
+
+        srt_data_values = list(srt_data.values())
+
+        # Chunk SRT Data into 128 item chunks
+        # print(srt_data_values)
+        # chunked_values = [
+        #     srt_data_values[i : i + 128]
+        #     for i in range(0, len(srt_data_values), 128)
+        # ]
+        # print(chunked_values)
+
+        translations = []
+        for i, original_text in enumerate(srt_data_values, start=1):
+            print("----------------------")
+            print(i, original_text)
+            translated_text = self.__client__.translate(
+                original_text,
+                target_language=target_language,
+                source_language=source_language,
+            )
+            translated_text = translated_text.strip('"').strip()
+            print(translated_text)
+            if appending_original:
+                translated_text += "\n" + original_text
+            translations.append(translated_text)
+        output_srt_data = dict(zip(srt_data.keys(), translations))
+        self.write_srt(filepath=target_file, srt_data=output_srt_data)
+
+
+model = "qwen3:14b"
+input_folder = os.path.expanduser("~/subtitles/srts/original")
+output_folder = os.path.expanduser("~/subtitles/srts/translated-" + model)
+# source_language = "English"
+# target_language = "Simplified Chinese"
+target_language_label = "zh"
+
+translator = Translator(model=model)
+# translator.show_languages()
+
+# Create the output folder if it doesn't exist
+if not os.path.exists(output_folder):
+    os.makedirs(output_folder)
+
+for file in sorted(os.listdir(input_folder)):
+    if file.endswith(".srt"):
+        target_file = os.path.join(
+            output_folder, f"{os.path.splitext(file)[0]}.{target_language_label}.srt"
+        )
+        if os.path.exists(target_file):
+            print("Skipping as the target file exists: " + target_file)
+        else:
+            print("Translating " + os.path.join(input_folder, file))
+            translator.srt_file_translator(
+                source_file=os.path.join(input_folder, file),
+                target_file=target_file,
+                source_language=None,
+                target_language=None,
+                appending_original=True,
+                max_aggregated_statements=3,
+            )
