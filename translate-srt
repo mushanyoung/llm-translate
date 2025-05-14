@@ -403,8 +403,9 @@ class Translator(SRT_Utils):
 
 
 model = "qwen3:14b"
-input_folder = os.path.expanduser("~/subtitles/srts/original")
-output_folder = os.path.expanduser("~/subtitles/srts/translated-" + model)
+input_folder = os.path.dirname(os.path.abspath(__file__)) + "/srts/original"
+output_folder = os.path.dirname(os.path.abspath(__file__)) + "/srts/translated-" + model
+
 # source_language = "English"
 # target_language = "Simplified Chinese"
 target_language_label = "zh"
