@@ -21,11 +21,11 @@ class OllamaTranslate:
         # self.model = 'glm4'                   # bad quality, 9b
 
         # ENG to CHN
-        # self.model = "qwen3:14b"              #  for Survivor S45
-        # self.model = "qwen3:30b-a3b"          # ~2h for Survivor S45
         # self.model = 'qwen2.5:32b'            # quality #1, ~5.2h for Survivor S45
-        # self.model = 'deepseek-v2:16b'        # quality #2, ~1.5h for Survivor S45
-        # self.model = 'qwen2:7b'               # quality #3, ~1.5h for Survivor S45
+        # self.model = "qwen3:30b-a3b"          # quality #2, ~2h for Survivor S45
+        # self.model = "qwen3:14b"              # quality #3, ~3h for Survivor S45
+        # self.model = 'deepseek-v2:16b'        # quality #4, ~1.5h for Survivor S45
+        # self.model = 'qwen2:7b'               # quality #5, ~1.5h for Survivor S45
         # self.model = 'glm4:9b'                # quality similar to qwen2
         # self.model = 'yi:34b'                 # bad quality, slow
         # self.model = 'phi3:14b'               # bad quality, ~19m
@@ -34,7 +34,7 @@ class OllamaTranslate:
         self.target_language = "Simplified Chinese"
         self.source_language = "English"
 
-        self.prompts = {
+        self.system_prompts = {
             "Japanese": """You are a professional translator proficient in Simplified Chinese, especially skilled at translating Japanese popular TV shows into Chinese while retaining the original flavor but making the Chinese text smooth, natural, and easy to read. I hope you can help me translate the following Japanese TV show subtitles into Chinese, with a style similar to that of popular Chinese native speaking. Note that there will be a list of special phrases which we'd like to keep them in original Japanese words in the result. The list will be provided in the Rules part.
 
 1. Strategies:
@@ -141,7 +141,7 @@ If the original text does not need to be translated, simply return the original 
             messages=[
                 {
                     "role": "system",
-                    "content": self.prompts[source_language] + " /no_think",
+                    "content": self.system_prompts[source_language] + " /no_think",
                 },
                 {
                     "role": "user",
@@ -402,7 +402,7 @@ class Translator(SRT_Utils):
         self.write_srt(filepath=target_file, srt_data=output_srt_data)
 
 
-model = "qwen3:14b"
+model = "qwen3:30b-a3b"
 input_folder = os.path.dirname(os.path.abspath(__file__)) + "/srts/original"
 output_folder = os.path.dirname(os.path.abspath(__file__)) + "/srts/translated-" + model
 
