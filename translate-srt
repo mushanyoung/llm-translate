@@ -1,4 +1,22 @@
 #!/usr/bin/env python3
+"""
+SRT File Translator
+
+This script translates SRT subtitle files from one language to another using Ollama models.
+It supports configurable aggregation of subtitle statements to create more coherent translation units.
+
+Key features:
+- Parses and processes SRT subtitle files
+- Aggregates statements based on configurable rules (max statements, max words, delimiters)
+- Translates content using local Ollama LLM models
+- Preserves timing information from original subtitles
+- Supports appending original text to translations
+
+Usage:
+- Configure the model and language settings at the bottom of the script
+- Place SRT files in the input folder (srts/original by default)
+- Run the script to generate translated files in the output folder
+"""
 
 import os
 import codecs
@@ -9,8 +27,23 @@ from typing import Optional
 
 
 class OllamaTranslate:
+    """
+    Wrapper class for Ollama API to handle translation tasks.
+    
+    This class manages the translation process using Ollama models with 
+    specialized system prompts for different source languages.
+    """
+    
     def __init__(self, model):
+        """
+        Initialize the OllamaTranslate class with a specific model.
+        
+        Args:
+            model (str): The name of the Ollama model to use for translation.
+        """
         self.model = model
+        # Model options with performance notes:
+        
         # JPN to CHN
         # self.model = "qwen3:30b-a3b"
         # self.model = "qwen2.5:32b"            # quality #1, ~15m for 1100 phrases
@@ -31,9 +64,12 @@ class OllamaTranslate:
         # self.model = 'phi3:14b'               # bad quality, ~19m
         # self.model = 'aya'                    # bad quality, ~6m
 
+        # Default language settings
         self.target_language = "Simplified Chinese"
         self.source_language = "English"
 
+        # System prompts for different source languages
+        # These prompts guide the LLM on how to translate the content
         self.system_prompts = {
             "Japanese": """You are a professional translator proficient in Simplified Chinese, especially skilled at translating Japanese popular TV shows into Chinese while retaining the original flavor but making the Chinese text smooth, natural, and easy to read. I hope you can help me translate the following Japanese TV show subtitles into Chinese, with a style similar to that of popular Chinese native speaking. Note that there will be a list of special phrases which we'd like to keep them in original Japanese words in the result. The list will be provided in the Rules part.
 
@@ -122,6 +158,7 @@ Be careful not to add any other prompts, explanations, questions, backgrounds or
 If the original text does not need to be translated, simply return the original text without any explanation or question.""",
         }
 
+        # Additional prompt examples (commented out but preserved for reference)
         # 'content': f'''You're an expert of translting TV show subtitles from "{source_language}" to "{target_language}".
 
     # Now, direct translate the following quoted TV show subtitle sentence from "{source_language}" to "{target_language}", provide only translated text without explanation or original text. If the orignal text does not need to be translated, directly output it without explanation.
@@ -134,8 +171,21 @@ If the original text does not need to be translated, simply return the original 
     # If a sentence starts with a capitalized name and a colon, keep it in the original language.
 
     def translate(self, message, source_language=None, target_language=None):
+        """
+        Translate text using the Ollama model.
+        
+        Args:
+            message (str): The text to translate
+            source_language (str, optional): The source language. Defaults to self.source_language.
+            target_language (str, optional): The target language. Defaults to self.target_language.
+            
+        Returns:
+            str: The translated text
+        """
         source_language = source_language or self.source_language
         target_language = target_language or self.target_language
+        
+        # Call Ollama API with the appropriate system prompt for the source language
         response = ollama.chat(
             model=self.model,
             messages=[
@@ -149,18 +199,29 @@ If the original text does not need to be translated, simply return the original 
                 },
             ],
         )
+        
+        # Process the response
         content = response["message"]["content"]
+        # Remove any thinking tags that might be in the response
         content = re.sub(r"</?think>", "", content, flags=re.DOTALL | re.IGNORECASE)
         return content
 
 
 @type_enforced.Enforcer
 class SRT_Utils:
+    """
+    Utility class for parsing, manipulating, and writing SRT files.
+    
+    This class contains methods for parsing SRT files, aggregating statements
+    based on various rules, and writing processed content back to SRT files.
+    """
+    
     def parse_srt(
         self,
         filepath: str,
         statement_delimiters: list = [],
         max_aggregated_statements: int = 3,
+        max_aggregated_words: int = 20,
     ):
         """
         Parses an SRT file into a dictionary of statements.
@@ -168,72 +229,88 @@ class SRT_Utils:
         The values of the dictionary are the statements themselves.
         Statements that are split across multiple lines are aggregated.
 
-        Arguments:
-
-        * **`filepath`**: `[str]` &rarr; The path to the SRT file to be parsed.
-        * **`statement_delimiters`**: `[list]` &rarr; A list of characters that indicate the end of a statement. Defaults to `[".", "?", "!"]`.
+        Args:
+            filepath (str): The path to the SRT file to be parsed.
+            statement_delimiters (list): A list of characters that indicate the end of a statement.
+            max_aggregated_statements (int): The maximum number of statements to aggregate. Defaults to 3.
+            max_aggregated_words (int): The maximum number of words in an aggregated statement. Defaults to 20.
+            
+        Returns:
+            dict: A dictionary mapping timestamps to subtitle text
         """
+        # Regular expression to match SRT timestamp format
         time_structure = re.compile(
             r"\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}"
         )
 
+        # Initialize variables for parsing
         last_time = "00:00:00,000 --> 00:00:00,000"
         srt_data = {}
 
+        # Read and parse the SRT file line by line
         with open(filepath) as filedata:
             for line in filedata:
                 line_data = line[:-1]
                 if time_structure.match(line_data) is not None:
+                    # This is a timestamp line
                     last_time = line_data
                     srt_data[last_time] = []
                 else:
+                    # This is a subtitle text line
                     if last_time not in srt_data:
                         srt_data[last_time] = []
                     srt_data[last_time].append(line_data)
+                    
+        # Join multi-line subtitle text
         for key, value in srt_data.items():
             srt_data[key] = " ".join(value[:-1] + [""]).strip()
 
+        # Aggregate statements based on rules
         srt_data = self.aggregate_statements(
             srt_data=srt_data,
             statement_delimiters=statement_delimiters,
             max_aggregated_statements=max_aggregated_statements,
+            max_aggregated_words=max_aggregated_words,
         )
         return srt_data
 
     def aggregate_statements(
-        self, srt_data: dict, statement_delimiters: list, max_aggregated_statements: int
+        self, 
+        srt_data: dict, 
+        statement_delimiters: list, 
+        max_aggregated_statements: int,
+        max_aggregated_words: int = 20,
     ):
         """
         Takes in a dictionary of SRT data and aggregates statements that are split across multiple lines.
         Also aggregates adjacent repeating statements.
         Items are aggregated until a statement delimiter is found at the end of a line.
 
-        Arguments:
-
-        * **`srt_data`**: `[dict]` &rarr; The parsed SRT data.
-        * **`statement_delimiters`**: `[list]` &rarr; A list of characters that indicate the end of a statement. Defaults to `[".", "?", "!"]`.
+        Args:
+            srt_data (dict): The parsed SRT data.
+            statement_delimiters (list): A list of characters that indicate the end of a statement.
+            max_aggregated_statements (int): The maximum number of statements to aggregate.
+            max_aggregated_words (int): The maximum number of words in an aggregated statement. Defaults to 20.
 
         Returns:
+            dict: The aggregated SRT data.
 
-        * **`out_data`**: `[dict]` &rarr; The aggregated SRT data.
+        Example:
+            ```python
+            srt_data = {
+                "00:00:00,000 --> 00:00:01,000": "Hello World!",
+                "00:00:01,000 --> 00:00:02,000": "This is",
+                "00:00:02,000 --> 00:00:03,000": "a test."
+            }
 
-        EG:
-
-        ```python
-
-        srt_data = {
-            "00:00:00,000 --> 00:00:01,000": "Hello World!",
-            "00:00:01,000 --> 00:00:02,000": "This is",
-            "00:00:02,000 --> 00:00:03,000": "a test."
-        }
-
-        Translator.aggregate_statements(srt_data=srt_data, statement_delimiters=[".", "?", "!"])
-        #=> {
-        #=>     "00:00:00,000 --> 00:00:01,000": "Hello World!",
-        #=>     "00:00:01,000 --> 00:00:03,000": "This is a test."
-        #=> }
+            Translator.aggregate_statements(srt_data=srt_data, statement_delimiters=[".", "?", "!"])
+            #=> {
+            #=>     "00:00:00,000 --> 00:00:01,000": "Hello World!",
+            #=>     "00:00:01,000 --> 00:00:03,000": "This is a test."
+            #=> }
+            ```
         """
-
+        # Default statement delimiters if none are provided
         default_statement_delimiters = [
             ".",
             "?",
@@ -246,7 +323,10 @@ class SRT_Utils:
             ".org",
             ".com",
         ]
+        # Combine user-provided and default delimiters
         delimiters = set(statement_delimiters + default_statement_delimiters)
+        
+        # Convert dictionary to list of dictionaries for easier manipulation
         data = []
         for key, value in srt_data.items():
             data.append(
@@ -256,17 +336,22 @@ class SRT_Utils:
                     "string": value,
                 }
             )
+            
+        # Process and merge statements
         merged_data = []
         current_merged_count = 1
         for idx, item in enumerate(data):
+            # Skip empty strings
             if len(item["string"]) == 0:
                 continue
-            # Aggregate adjacent repeating statments.
+                
+            # Handle duplicate adjacent statements - keep only one instance
             if idx + 1 < len(data) and item["string"] == data[idx + 1]["string"]:
                 data[idx + 1]["start"] = item["start"]
                 continue
-            # Cut current statement based on its ending substring or current
-            # merged account.
+                
+            # Determine if we should cut here or continue merging
+            # Cut if: statement ends with delimiter, at end of data, or hit max merge count
             if (
                 any(map(lambda x: item["string"].endswith(x), delimiters))
                 or idx == len(data) - 1
@@ -274,11 +359,23 @@ class SRT_Utils:
             ):
                 merged_data.append(item)
                 current_merged_count = 1
-            # Merge current statement into the next statement.
+            # Otherwise try to merge with next statement
             else:
-                data[idx + 1]["string"] = item["string"] + " " + data[idx + 1]["string"]
-                data[idx + 1]["start"] = item["start"]
-                current_merged_count += 1
+                # Check if the combined text would exceed max_aggregated_words
+                combined_text = item["string"] + " " + data[idx + 1]["string"]
+                word_count = len(combined_text.split())
+                if word_count > max_aggregated_words:
+                    # Don't merge if word count exceeds the limit - this prevents creating overly long sentences
+                    # which may be harder to translate accurately or may cause issues with the LLM's context window
+                    merged_data.append(item)
+                    current_merged_count = 1
+                else:
+                    # Proceed with merging
+                    data[idx + 1]["string"] = combined_text
+                    data[idx + 1]["start"] = item["start"]
+                    current_merged_count += 1
+                    
+        # Convert back to dictionary format with timestamps as keys
         out_data = {}
         for item in merged_data:
             out_data[item["start"] + " --> " + item["end"]] = item["string"].strip()
@@ -286,39 +383,52 @@ class SRT_Utils:
 
     def write_srt(self, filepath: str, srt_data: dict):
         """
-        Writes SRT data to a file.
+        Writes SRT data to a file in standard SRT format.
 
-        Arguments:
-
-        * **`filepath`**: `[str]` &rarr; The path to the SRT file to be written.
-        * **`srt_data`**: `[dict]` &rarr; The SRT data to be written to the file.
+        Args:
+            filepath (str): The path to the SRT file to be written.
+            srt_data (dict): The SRT data to be written to the file.
         """
+        # SRT files use 0-indexed counters for subtitles
         idx = 0
         with codecs.open(filepath, "w+", encoding="utf-8-sig") as out_file:
             for key, value in srt_data.items():
+                # Write the subtitle number
                 out_file.write(str(idx) + "\n")
+                # Write the timestamp
                 out_file.write(key + "\n")
+                # Write the subtitle text
                 out_file.write(value + "\n")
+                # Write a blank line to separate subtitle blocks
                 out_file.write("\n")
                 idx += 1
 
 
 @type_enforced.Enforcer
 class Translator(SRT_Utils):
+    """
+    Main class that combines SRT parsing and translation functionality.
+    
+    This class inherits from SRT_Utils to handle SRT file operations and adds
+    translation capabilities using the OllamaTranslate class.
+    """
+    
     def __init__(self, model: str):
         """
-        Initializes the Translator class.
-
-        Arguments:
-
-        * **`key_path`**: `[str]` &rarr; The path to the Google Cloud API key.
-            * You can create a key by following the instructions [here](https://cloud.google.com/translate/docs/setup).
+        Initialize the Translator with a specific Ollama model.
+        
+        Args:
+            model (str): The name of the Ollama model to use for translation.
         """
+        # Initialize the Ollama client with the specified model
         self.__client__ = OllamaTranslate(model=model)
 
     def show_languages(self):
         """
         Prints a list of available languages.
+        
+        Note: This method is preserved for compatibility but currently doesn't
+        have functionality as Ollama doesn't provide a language list API.
         """
         for language in self.__languages__:
             print("{name} ({language})".format(**language))
@@ -329,13 +439,15 @@ class Translator(SRT_Utils):
         """
         Translates a string of text from one language to another.
 
-        Arguments:
-
-        * **`text`**: `[str]` &rarr; The text to be translated.
-        * **`source_language`**: `[str]` &rarr; The language of the text to be translated.
-        * **`target_language`**: `[str]` &rarr; The language to translate the text to.
+        Args:
+            text (str): The text to be translated.
+            source_language (str, optional): The language of the text to be translated.
+            target_language (str, optional): The language to translate the text to.
+            
+        Returns:
+            str: The translated text
         """
-
+        # Delegate to the Ollama client
         return self.__client__.translate(
             text,
             target_language=target_language,
@@ -351,31 +463,37 @@ class Translator(SRT_Utils):
         appending_original: bool = False,
         statement_delimiters: list = [],
         max_aggregated_statements: int = 3,
+        max_aggregated_words: int = 20,
     ):
         """
         Reads an SRT file, translates the text, and writes the translated text to a new SRT file.
 
-        Arguments:
-
-        * **`source_file`**: `[str]` &rarr; The path to the SRT file to be translated.
-        * **`target_file`**: `[str]` &rarr; The path to the SRT file to be written.
-        * **`source_language`**: `[str]` &rarr; The language of the text to be translated.
-        * **`target_language`**: `[str]` &rarr; The language to translate the text to.
-        * **`statement_delimiters`**: `[list]` &rarr; A list of characters that indicate the end of a statement. Defaults to `[".", "?", "!"]`.
+        Args:
+            source_file (str): The path to the SRT file to be translated.
+            target_file (str): The path to the SRT file to be written.
+            source_language (str, optional): The language of the text to be translated.
+            target_language (str, optional): The language to translate the text to.
+            appending_original (bool): Whether to append the original text after the translation.
+            statement_delimiters (list): A list of characters that indicate the end of a statement.
+            max_aggregated_statements (int): The maximum number of statements to aggregate. Defaults to 3.
+            max_aggregated_words (int): The maximum number of words in an aggregated statement. Defaults to 20.
         """
-        # General Assertions
+        # Input validation
         assert source_file.endswith(".srt"), "Source file must be a .srt file"
         assert target_file.endswith(".srt"), "Target file must be a .srt file"
 
-        # Parse SRT
+        # Parse the SRT file
         srt_data = self.parse_srt(
             filepath=source_file,
             statement_delimiters=statement_delimiters,
             max_aggregated_statements=max_aggregated_statements,
+            max_aggregated_words=max_aggregated_words,
         )
 
+        # Get all subtitle texts as a list
         srt_data_values = list(srt_data.values())
 
+        # Note: Chunking code is commented out but preserved for reference
         # Chunk SRT Data into 128 item chunks
         # print(srt_data_values)
         # chunked_values = [
@@ -384,53 +502,78 @@ class Translator(SRT_Utils):
         # ]
         # print(chunked_values)
 
+        # Translate each subtitle text
         translations = []
         for i, original_text in enumerate(srt_data_values, start=1):
             print("----------------------")
             print(i, original_text)
+            
+            # Translate the text
             translated_text = self.__client__.translate(
                 original_text,
                 target_language=target_language,
                 source_language=source_language,
             )
+            
+            # Clean up the translated text
             translated_text = translated_text.strip('"').strip()
             print(translated_text)
+            
+            # Optionally append original text below the translation
             if appending_original:
                 translated_text += "\n" + original_text
+                
             translations.append(translated_text)
+            
+        # Create a new dictionary with the original timestamps and translated texts
         output_srt_data = dict(zip(srt_data.keys(), translations))
+        
+        # Write the translated data to the target file
         self.write_srt(filepath=target_file, srt_data=output_srt_data)
 
 
+# ======== Main Script Configuration ========
+
+# Set the Ollama model to use for translation
 model = "qwen3:30b-a3b"
+
+# Define input and output directories
 input_folder = os.path.dirname(os.path.abspath(__file__)) + "/srts/original"
 output_folder = os.path.dirname(os.path.abspath(__file__)) + "/srts/translated-" + model
 
-# source_language = "English"
-# target_language = "Simplified Chinese"
-target_language_label = "zh"
+# Language configuration
+# source_language = "English"  # Set automatically based on the model
+# target_language = "Simplified Chinese"  # Set automatically based on the model
+target_language_label = "zh"  # Used in output filenames
 
+# Initialize the translator
 translator = Translator(model=model)
-# translator.show_languages()
+# translator.show_languages()  # Uncomment to show available languages
 
 # Create the output folder if it doesn't exist
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
 
+# Process each SRT file in the input folder
 for file in sorted(os.listdir(input_folder)):
     if file.endswith(".srt"):
+        # Construct the target file path
         target_file = os.path.join(
             output_folder, f"{os.path.splitext(file)[0]}.{target_language_label}.srt"
         )
+        
+        # Skip files that have already been translated
         if os.path.exists(target_file):
             print("Skipping as the target file exists: " + target_file)
         else:
+            # Translate the file
             print("Translating " + os.path.join(input_folder, file))
             translator.srt_file_translator(
                 source_file=os.path.join(input_folder, file),
                 target_file=target_file,
-                source_language=None,
-                target_language=None,
-                appending_original=True,
-                max_aggregated_statements=3,
+                source_language=None,  # Use default from model
+                target_language=None,  # Use default from model
+                appending_original=True,  # Include original text below translation
+                max_aggregated_statements=3,  # Maximum statements to combine
+                max_aggregated_words=20,  # Maximum words in a combined statement
             )
