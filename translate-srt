@@ -29,21 +29,21 @@ from typing import Optional
 class OllamaTranslate:
     """
     Wrapper class for Ollama API to handle translation tasks.
-    
-    This class manages the translation process using Ollama models with 
+
+    This class manages the translation process using Ollama models with
     specialized system prompts for different source languages.
     """
-    
+
     def __init__(self, model):
         """
         Initialize the OllamaTranslate class with a specific model.
-        
+
         Args:
             model (str): The name of the Ollama model to use for translation.
         """
         self.model = model
         # Model options with performance notes:
-        
+
         # JPN to CHN
         # self.model = "qwen3:30b-a3b"
         # self.model = "qwen2.5:32b"            # quality #1, ~15m for 1100 phrases
@@ -173,18 +173,18 @@ If the original text does not need to be translated, simply return the original 
     def translate(self, message, source_language=None, target_language=None):
         """
         Translate text using the Ollama model.
-        
+
         Args:
             message (str): The text to translate
             source_language (str, optional): The source language. Defaults to self.source_language.
             target_language (str, optional): The target language. Defaults to self.target_language.
-            
+
         Returns:
             str: The translated text
         """
         source_language = source_language or self.source_language
         target_language = target_language or self.target_language
-        
+
         # Call Ollama API with the appropriate system prompt for the source language
         response = ollama.chat(
             model=self.model,
@@ -199,7 +199,7 @@ If the original text does not need to be translated, simply return the original 
                 },
             ],
         )
-        
+
         # Process the response
         content = response["message"]["content"]
         # Remove any thinking tags that might be in the response
@@ -211,11 +211,11 @@ If the original text does not need to be translated, simply return the original 
 class SRT_Utils:
     """
     Utility class for parsing, manipulating, and writing SRT files.
-    
+
     This class contains methods for parsing SRT files, aggregating statements
     based on various rules, and writing processed content back to SRT files.
     """
-    
+
     def parse_srt(
         self,
         filepath: str,
@@ -234,7 +234,7 @@ class SRT_Utils:
             statement_delimiters (list): A list of characters that indicate the end of a statement.
             max_aggregated_statements (int): The maximum number of statements to aggregate. Defaults to 3.
             max_aggregated_words (int): The maximum number of words in an aggregated statement. Defaults to 20.
-            
+
         Returns:
             dict: A dictionary mapping timestamps to subtitle text
         """
@@ -260,7 +260,7 @@ class SRT_Utils:
                     if last_time not in srt_data:
                         srt_data[last_time] = []
                     srt_data[last_time].append(line_data)
-                    
+
         # Join multi-line subtitle text
         for key, value in srt_data.items():
             srt_data[key] = " ".join(value[:-1] + [""]).strip()
@@ -275,9 +275,9 @@ class SRT_Utils:
         return srt_data
 
     def aggregate_statements(
-        self, 
-        srt_data: dict, 
-        statement_delimiters: list, 
+        self,
+        srt_data: dict,
+        statement_delimiters: list,
         max_aggregated_statements: int,
         max_aggregated_words: int = 20,
     ):
@@ -325,7 +325,7 @@ class SRT_Utils:
         ]
         # Combine user-provided and default delimiters
         delimiters = set(statement_delimiters + default_statement_delimiters)
-        
+
         # Convert dictionary to list of dictionaries for easier manipulation
         data = []
         for key, value in srt_data.items():
@@ -336,7 +336,7 @@ class SRT_Utils:
                     "string": value,
                 }
             )
-            
+
         # Process and merge statements
         merged_data = []
         current_merged_count = 1
@@ -344,12 +344,12 @@ class SRT_Utils:
             # Skip empty strings
             if len(item["string"]) == 0:
                 continue
-                
+
             # Handle duplicate adjacent statements - keep only one instance
             if idx + 1 < len(data) and item["string"] == data[idx + 1]["string"]:
                 data[idx + 1]["start"] = item["start"]
                 continue
-                
+
             # Determine if we should cut here or continue merging
             # Cut if: statement ends with delimiter, at end of data, or hit max merge count
             if (
@@ -374,7 +374,7 @@ class SRT_Utils:
                     data[idx + 1]["string"] = combined_text
                     data[idx + 1]["start"] = item["start"]
                     current_merged_count += 1
-                    
+
         # Convert back to dictionary format with timestamps as keys
         out_data = {}
         for item in merged_data:
@@ -408,15 +408,15 @@ class SRT_Utils:
 class Translator(SRT_Utils):
     """
     Main class that combines SRT parsing and translation functionality.
-    
+
     This class inherits from SRT_Utils to handle SRT file operations and adds
     translation capabilities using the OllamaTranslate class.
     """
-    
+
     def __init__(self, model: str):
         """
         Initialize the Translator with a specific Ollama model.
-        
+
         Args:
             model (str): The name of the Ollama model to use for translation.
         """
@@ -426,7 +426,7 @@ class Translator(SRT_Utils):
     def show_languages(self):
         """
         Prints a list of available languages.
-        
+
         Note: This method is preserved for compatibility but currently doesn't
         have functionality as Ollama doesn't provide a language list API.
         """
@@ -443,7 +443,7 @@ class Translator(SRT_Utils):
             text (str): The text to be translated.
             source_language (str, optional): The language of the text to be translated.
             target_language (str, optional): The language to translate the text to.
-            
+
         Returns:
             str: The translated text
         """
@@ -493,41 +493,32 @@ class Translator(SRT_Utils):
         # Get all subtitle texts as a list
         srt_data_values = list(srt_data.values())
 
-        # Note: Chunking code is commented out but preserved for reference
-        # Chunk SRT Data into 128 item chunks
-        # print(srt_data_values)
-        # chunked_values = [
-        #     srt_data_values[i : i + 128]
-        #     for i in range(0, len(srt_data_values), 128)
-        # ]
-        # print(chunked_values)
-
         # Translate each subtitle text
         translations = []
         for i, original_text in enumerate(srt_data_values, start=1):
             print("----------------------")
             print(i, original_text)
-            
+
             # Translate the text
             translated_text = self.__client__.translate(
                 original_text,
                 target_language=target_language,
                 source_language=source_language,
             )
-            
+
             # Clean up the translated text
             translated_text = translated_text.strip('"').strip()
             print(translated_text)
-            
+
             # Optionally append original text below the translation
             if appending_original:
                 translated_text += "\n" + original_text
-                
+
             translations.append(translated_text)
-            
+
         # Create a new dictionary with the original timestamps and translated texts
         output_srt_data = dict(zip(srt_data.keys(), translations))
-        
+
         # Write the translated data to the target file
         self.write_srt(filepath=target_file, srt_data=output_srt_data)
 
@@ -561,7 +552,7 @@ for file in sorted(os.listdir(input_folder)):
         target_file = os.path.join(
             output_folder, f"{os.path.splitext(file)[0]}.{target_language_label}.srt"
         )
-        
+
         # Skip files that have already been translated
         if os.path.exists(target_file):
             print("Skipping as the target file exists: " + target_file)
