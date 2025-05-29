@@ -150,7 +150,7 @@ Accurately convey the facts and background of the original text during translati
 Retain the names of people, specific terms, and brand names from the original text (if any).
 
 Specific terms:
-Use following specific translations for given terms, A = B means the term A directly translates to B: immunity = 豁免, idol = 神像, player = 选手, Survivor = 幸存者
+Use following specific translations for given terms, A = B means the term A directly translates to B: immunity = 豁免, idol = 神像, player = 选手, Survivor = 幸存者, buff = 头巾
 
 Strategies:
 Do not add any markers such as "Translation:" at the beginning of the translation, just present the translated content directly.
@@ -239,9 +239,7 @@ class SRT_Utils:
             dict: A dictionary mapping timestamps to subtitle text
         """
         # Regular expression to match SRT timestamp format
-        time_structure = re.compile(
-            r"\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}"
-        )
+        time_structure = re.compile(r"\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}")
 
         # Initialize variables for parsing
         last_time = "00:00:00,000 --> 00:00:00,000"
@@ -310,7 +308,7 @@ class SRT_Utils:
             #=> }
             ```
         """
-        # Default statement delimiters if none are provided
+        # Default statement delimiters
         default_statement_delimiters = [
             ".",
             "?",
@@ -341,6 +339,9 @@ class SRT_Utils:
         merged_data = []
         current_merged_count = 1
         for idx, item in enumerate(data):
+            # strip the string
+            item["string"] = item["string"].strip()
+
             # Skip empty strings
             if len(item["string"]) == 0:
                 continue
@@ -433,9 +434,7 @@ class Translator(SRT_Utils):
         for language in self.__languages__:
             print("{name} ({language})".format(**language))
 
-    def translate(
-        self, text: str, source_language: Optional[str], target_language: Optional[str]
-    ):
+    def translate(self, text: str, source_language: Optional[str], target_language: Optional[str]):
         """
         Translates a string of text from one language to another.
 
